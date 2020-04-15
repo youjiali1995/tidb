@@ -1728,10 +1728,10 @@ func RunDistributedGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safe
 	// Sleep to wait for all other tidb instances update their safepoint cache.
 	// time.Sleep(gcSafePointCacheInterval)
 
-	err = gcWorker.uploadSafePointToPD(ctx, safePoint)
-	if err != nil {
-		return physicalUsed, errors.Trace(err)
-	}
+	// err = gcWorker.uploadSafePointToPD(ctx, safePoint)
+	// if err != nil {
+	// return physicalUsed, errors.Trace(err)
+	// }
 	return physicalUsed, nil
 }
 
