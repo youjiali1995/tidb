@@ -1052,16 +1052,22 @@ func (w *GCWorker) resolveLocksPhysical(ctx context.Context, safePoint uint64) e
 		w.removeLockObservers(ctx, safePoint, stores)
 	}()
 
+	registeredStores := make(map[uint64]interface{})
 	for retry := 0; retry < 3; retry++ {
 		err = w.registerLockObservers(ctx, safePoint, dirtyStores)
 		if err != nil {
 			return errors.Trace(err)
+		}
+		for id := range dirtyStores {
+			registeredStores[id] = nil
 		}
 
 		resolvedStores, err := w.physicalScanAndResolveLocks(ctx, safePoint, dirtyStores)
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		failpoint.Inject("beforeCheckLockObservers", func() {})
 
 		stores, err := w.getUpStoresMapForGC(ctx)
 		if err != nil {
@@ -1083,6 +1089,13 @@ func (w *GCWorker) resolveLocksPhysical(ctx context.Context, safePoint uint64) e
 				if _, ok := dirtyStores[store]; !ok {
 					delete(stores, store)
 				}
+				// If the store is checked and not resolved, we can retry to resolve it again, so leave it in dirtyStores.
+			} else if _, ok := registeredStores[store]; ok {
+				// The store has been registered and it's dirty due to too many collected locks. Fall back to legacy mode.
+				// We can't remove the lock observer from the store and retry the whole procedure because if the store
+				// receives duplicated remove and register requests during resolving locks, the store will be cleaned
+				// when checking but the lock observer drops some locks. It may results in missing locks.
+				return errors.Errorf("store %v is dirty", store)
 			}
 		}
 		dirtyStores = stores
@@ -1092,8 +1105,6 @@ func (w *GCWorker) resolveLocksPhysical(ctx context.Context, safePoint uint64) e
 		if len(dirtyStores) == 0 {
 			break
 		}
-		// Clear all collected locks of dirty stores to prevent it from being dirty again.
-		w.removeLockObservers(ctx, safePoint, dirtyStores)
 	}
 
 	if len(dirtyStores) != 0 {
@@ -1124,7 +1135,9 @@ func (w *GCWorker) registerLockObservers(ctx context.Context, safePoint uint64, 
 		if err != nil {
 			return errors.Trace(err)
 		}
-
+		if resp.Resp == nil {
+			return errors.Trace(tikv.ErrBodyMissing)
+		}
 		errStr := resp.Resp.(*kvrpcpb.RegisterLockObserverResponse).Error
 		if len(errStr) > 0 {
 			return errors.Errorf("register lock observer on store %v returns error: %v", store.Id, errStr)
@@ -1144,31 +1157,33 @@ func (w *GCWorker) checkLockObservers(ctx context.Context, safePoint uint64, sto
 	req := tikvrpc.NewRequest(tikvrpc.CmdCheckLockObserver, &kvrpcpb.CheckLockObserverRequest{
 		MaxTs: safePoint,
 	})
-
 	cleanStores := make(map[uint64]interface{}, len(stores))
+
+	logError := func(store *metapb.Store, err error) {
+		logutil.Logger(ctx).Error("[gc worker] failed to check lock observer for store",
+			zap.String("uuid", w.uuid),
+			zap.Any("store", store),
+			zap.Error(err))
+	}
 
 	// When error occurs, this function doesn't fail immediately, but continues without adding the failed store to
 	// cleanStores set.
-
 	for _, store := range stores {
 		address := store.Address
 
 		resp, err := w.store.GetTiKVClient().SendRequest(ctx, address, req, tikv.AccessLockObserverTimeout)
 		if err != nil {
-			logutil.Logger(ctx).Error("[gc worker] failed to check lock observer for store",
-				zap.String("uuid", w.uuid),
-				zap.Any("store", store),
-				zap.Error(err))
+			logError(store, err)
 			continue
 		}
-
+		if resp.Resp == nil {
+			logError(store, tikv.ErrBodyMissing)
+			continue
+		}
 		respInner := resp.Resp.(*kvrpcpb.CheckLockObserverResponse)
 		if len(respInner.Error) > 0 {
 			err = errors.Errorf("check lock observer on store %v returns error: %v", store.Id, respInner.Error)
-			logutil.Logger(ctx).Error("[gc worker] failed to check lock observer for store",
-				zap.String("uuid", w.uuid),
-				zap.Any("store", store),
-				zap.Error(err))
+			logError(store, err)
 			continue
 		}
 
@@ -1185,10 +1200,7 @@ func (w *GCWorker) checkLockObservers(ctx context.Context, safePoint uint64, sto
 
 			if err != nil {
 				err = errors.Errorf("check lock observer on store %v returns error: %v", store.Id, respInner.Error)
-				logutil.Logger(ctx).Error("[gc worker] failed to check lock observer for store",
-					zap.String("uuid", w.uuid),
-					zap.Any("store", store),
-					zap.Error(err))
+				logError(store, err)
 				continue
 			}
 		}
@@ -1214,25 +1226,29 @@ func (w *GCWorker) removeLockObservers(ctx context.Context, safePoint uint64, st
 		MaxTs: safePoint,
 	})
 
+	logError := func(store *metapb.Store, err error) {
+		logutil.Logger(ctx).Warn("[gc worker] failed to remove lock observer from store",
+			zap.String("uuid", w.uuid),
+			zap.Any("store", store),
+			zap.Error(err))
+	}
+
 	for _, store := range stores {
 		address := store.Address
 
 		resp, err := w.store.GetTiKVClient().SendRequest(ctx, address, req, tikv.AccessLockObserverTimeout)
 		if err != nil {
-			logutil.Logger(ctx).Warn("[gc worker] failed to remove lock observer from store",
-				zap.String("uuid", w.uuid),
-				zap.Any("store", store),
-				zap.Error(err))
+			logError(store, err)
 			continue
 		}
-
+		if resp.Resp == nil {
+			logError(store, tikv.ErrBodyMissing)
+			continue
+		}
 		errStr := resp.Resp.(*kvrpcpb.RemoveLockObserverResponse).Error
 		if len(errStr) > 0 {
 			err = errors.Errorf("remove lock observer on store %v returns error: %v", store.Id, errStr)
-			logutil.Logger(ctx).Error("[gc worker] failed to remove lock observer from store",
-				zap.String("uuid", w.uuid),
-				zap.Any("store", store),
-				zap.Error(err))
+			logError(store, err)
 		}
 	}
 }
@@ -1954,12 +1970,10 @@ func (s *mergeLockScanner) physicalScanLocksForStore(ctx context.Context, safePo
 		if err != nil {
 			return errors.Trace(err)
 		}
-
-		resp := response.Resp.(*kvrpcpb.PhysicalScanLockResponse)
-		if resp == nil {
-			return errors.Errorf("physical scan lock response is nil")
+		if response.Resp == nil {
+			return errors.Trace(tikv.ErrBodyMissing)
 		}
-
+		resp := response.Resp.(*kvrpcpb.PhysicalScanLockResponse)
 		if len(resp.Error) > 0 {
 			return errors.Errorf("physical scan lock received error from store: %v", resp.Error)
 		}
