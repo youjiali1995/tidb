@@ -1035,31 +1035,21 @@ func (w *GCWorker) resolveLocksPhysical(ctx context.Context, safePoint uint64) e
 		zap.Uint64("safePoint", safePoint))
 	startTime := time.Now()
 
+	registeredStores := make(map[uint64]*metapb.Store)
+	defer w.removeLockObservers(ctx, safePoint, registeredStores)
+
 	dirtyStores, err := w.getUpStoresMapForGC(ctx)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer func() {
-		stores, err := w.getUpStoresMapForGC(ctx)
-		if err != nil {
-			logutil.Logger(ctx).Error("[gc worker] failed to remove lock observers",
-				zap.String("uuid", w.uuid),
-				zap.Uint64("safePoint", safePoint),
-				zap.NamedError("getUpStoresMapForGCErr", err),
-			)
-			return
-		}
-		w.removeLockObservers(ctx, safePoint, stores)
-	}()
 
-	registeredStores := make(map[uint64]interface{})
 	for retry := 0; retry < 3; retry++ {
 		err = w.registerLockObservers(ctx, safePoint, dirtyStores)
 		if err != nil {
 			return errors.Trace(err)
 		}
-		for id := range dirtyStores {
-			registeredStores[id] = nil
+		for id, store := range dirtyStores {
+			registeredStores[id] = store
 		}
 
 		resolvedStores, err := w.physicalScanAndResolveLocks(ctx, safePoint, dirtyStores)
@@ -1187,6 +1177,14 @@ func (w *GCWorker) checkLockObservers(ctx context.Context, safePoint uint64, sto
 			continue
 		}
 
+		// No need to resolve observed locks on uncleaned stores.
+		if !respInner.IsClean {
+			logutil.Logger(ctx).Warn("[gc worker] check lock observer: store is not clean",
+				zap.String("uuid", w.uuid),
+				zap.Any("store", store))
+			continue
+		}
+
 		if len(respInner.Locks) > 0 {
 			// Resolve the observed locks.
 			locks := make([]*tikv.Lock, len(respInner.Locks))
@@ -1204,14 +1202,7 @@ func (w *GCWorker) checkLockObservers(ctx context.Context, safePoint uint64, sto
 				continue
 			}
 		}
-
-		if respInner.IsClean {
-			cleanStores[store.Id] = nil
-		} else {
-			logutil.Logger(ctx).Warn("[gc worker] check lock observer: store is not clean",
-				zap.String("uuid", w.uuid),
-				zap.Any("store", store))
-		}
+		cleanStores[store.Id] = nil
 	}
 
 	return cleanStores, nil
