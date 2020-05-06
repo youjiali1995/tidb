@@ -530,7 +530,7 @@ func (w *GCWorker) runGCJob(ctx context.Context, safePoint uint64, concurrency i
 	if err != nil {
 		return errors.Trace(err)
 	}
-	err = w.resolveLocks(ctx, safePoint, concurrency, usePhysical)
+	_, err = w.resolveLocks(ctx, safePoint, concurrency, usePhysical)
 	if err != nil {
 		logutil.Logger(ctx).Error("[gc worker] resolve locks returns an error",
 			zap.String("uuid", w.uuid),
@@ -918,15 +918,15 @@ func (w *GCWorker) checkUsePhysicalScanLock() (bool, error) {
 	return false, nil
 }
 
-func (w *GCWorker) resolveLocks(ctx context.Context, safePoint uint64, concurrency int, usePhysical bool) error {
+func (w *GCWorker) resolveLocks(ctx context.Context, safePoint uint64, concurrency int, usePhysical bool) (bool, error) {
 	if !usePhysical {
-		return w.legacyResolveLocks(ctx, safePoint, concurrency)
+		return false, w.legacyResolveLocks(ctx, safePoint, concurrency)
 	}
 
 	// First try resolve locks with physical scan
 	err := w.resolveLocksPhysical(ctx, safePoint)
 	if err == nil {
-		return nil
+		return true, nil
 	}
 
 	logutil.Logger(ctx).Error("[gc worker] resolve locks with physical scan failed, trying fallback to legacy resolve lock",
@@ -934,7 +934,7 @@ func (w *GCWorker) resolveLocks(ctx context.Context, safePoint uint64, concurren
 		zap.Uint64("safePoint", safePoint),
 		zap.Error(err))
 
-	return w.legacyResolveLocks(ctx, safePoint, concurrency)
+	return false, w.legacyResolveLocks(ctx, safePoint, concurrency)
 }
 
 func (w *GCWorker) legacyResolveLocks(ctx context.Context, safePoint uint64, concurrency int) error {
@@ -1740,7 +1740,7 @@ func RunGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safePoint uint6
 		return errors.Trace(err)
 	}
 
-	err = gcWorker.resolveLocks(ctx, safePoint, concurrency, false)
+	_, err = gcWorker.resolveLocks(ctx, safePoint, concurrency, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1761,7 +1761,7 @@ func RunGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safePoint uint6
 // RunDistributedGCJob notifies TiKVs to do GC. It is exported for kv api, do not use it with GCWorker at the same time.
 // This function may not finish immediately because it may take some time to do resolveLocks.
 // Param concurrency specifies the concurrency of resolveLocks phase.
-func RunDistributedGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safePoint uint64, identifier string, concurrency int) error {
+func RunDistributedGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safePoint uint64, identifier string, concurrency int, usePhysical bool) (bool, error) {
 	gcWorker := &GCWorker{
 		store:    s,
 		uuid:     identifier,
@@ -1770,27 +1770,27 @@ func RunDistributedGCJob(ctx context.Context, s tikv.Storage, pd pd.Client, safe
 
 	safePoint, err := gcWorker.setGCWorkerServiceSafePoint(ctx, safePoint)
 	if err != nil {
-		return errors.Trace(err)
+		return false, errors.Trace(err)
 	}
 
-	err = gcWorker.resolveLocks(ctx, safePoint, concurrency, false)
+	physicalUsed, err := gcWorker.resolveLocks(ctx, safePoint, concurrency, usePhysical)
 	if err != nil {
-		return errors.Trace(err)
+		return physicalUsed, errors.Trace(err)
 	}
 
-	// Save safe point to pd.
-	err = gcWorker.saveSafePoint(gcWorker.store.GetSafePointKV(), safePoint)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	// Sleep to wait for all other tidb instances update their safepoint cache.
-	time.Sleep(gcSafePointCacheInterval)
+	// // Save safe point to pd.
+	// err = gcWorker.saveSafePoint(gcWorker.store.GetSafePointKV(), safePoint)
+	// if err != nil {
+	// return errors.Trace(err)
+	// }
+	// // Sleep to wait for all other tidb instances update their safepoint cache.
+	// time.Sleep(gcSafePointCacheInterval)
 
-	err = gcWorker.uploadSafePointToPD(ctx, safePoint)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return nil
+	// err = gcWorker.uploadSafePointToPD(ctx, safePoint)
+	// if err != nil {
+	// return errors.Trace(err)
+	// }
+	return physicalUsed, nil
 }
 
 // MockGCWorker is for test.
