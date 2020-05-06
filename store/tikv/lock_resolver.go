@@ -206,7 +206,7 @@ func (lr *LockResolver) BatchResolveLocks(bo *Backoffer, locks []*Lock, loc Regi
 	}
 
 	txnInfos := make(map[uint64]uint64)
-	startTime := time.Now()
+	// startTime := time.Now()
 	for _, l := range expiredLocks {
 		if _, ok := txnInfos[l.TxnID]; ok {
 			continue
@@ -226,9 +226,9 @@ func (lr *LockResolver) BatchResolveLocks(bo *Backoffer, locks []*Lock, loc Regi
 
 		txnInfos[l.TxnID] = uint64(status.commitTS)
 	}
-	logutil.BgLogger().Info("BatchResolveLocks: lookup txn status",
-		zap.Duration("cost time", time.Since(startTime)),
-		zap.Int("num of txn", len(txnInfos)))
+	// logutil.BgLogger().Info("BatchResolveLocks: lookup txn status",
+	// zap.Duration("cost time", time.Since(startTime)),
+	// zap.Int("num of txn", len(txnInfos)))
 
 	listTxnInfos := make([]*kvrpcpb.TxnInfo, 0, len(txnInfos))
 	for txnID, status := range txnInfos {
@@ -239,7 +239,7 @@ func (lr *LockResolver) BatchResolveLocks(bo *Backoffer, locks []*Lock, loc Regi
 	}
 
 	req := tikvrpc.NewRequest(tikvrpc.CmdResolveLock, &kvrpcpb.ResolveLockRequest{TxnInfos: listTxnInfos})
-	startTime = time.Now()
+	// startTime = time.Now()
 	resp, err := lr.store.SendReq(bo, req, loc, readTimeoutShort)
 	if err != nil {
 		return false, errors.Trace(err)
@@ -266,9 +266,9 @@ func (lr *LockResolver) BatchResolveLocks(bo *Backoffer, locks []*Lock, loc Regi
 		return false, errors.Errorf("unexpected resolve err: %s", keyErr)
 	}
 
-	logutil.BgLogger().Info("BatchResolveLocks: resolve locks in a batch",
-		zap.Duration("cost time", time.Since(startTime)),
-		zap.Int("num of locks", len(expiredLocks)))
+	// logutil.BgLogger().Info("BatchResolveLocks: resolve locks in a batch",
+	// zap.Duration("cost time", time.Since(startTime)),
+	// zap.Int("num of locks", len(expiredLocks)))
 	return true, nil
 }
 
