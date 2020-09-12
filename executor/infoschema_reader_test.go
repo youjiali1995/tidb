@@ -212,7 +212,10 @@ func (s *testInfoschemaTableSuite) TestViews(c *C) {
 
 func (s *testInfoschemaTableSuite) TestEngines(c *C) {
 	tk := testkit.NewTestKit(c, s.store)
-	tk.MustQuery("select * from information_schema.ENGINES;").Check(testkit.Rows("InnoDB DEFAULT Supports transactions, row-level locking, and foreign keys YES YES YES"))
+	tk.MustQuery("select * from information_schema.ENGINES;").Check(testutil.RowsWithSep("|",
+		"InnoDB|DEFAULT|Supports transactions, row-level locking, and foreign keys|YES|YES|YES",
+		"TiFlash|YES|Column-oriented|NO|NO|NO",
+	))
 }
 
 func (s *testInfoschemaTableSuite) TestCharacterSetCollations(c *C) {
@@ -838,4 +841,12 @@ func (s *testInfoschemaTableSuite) TestTablesPKType(c *C) {
 	tk.MustExec("create table t_common (a varchar(64) primary key, b int)")
 	tk.MustQuery("SELECT TIDB_PK_TYPE FROM information_schema.tables where table_schema = 'test' and table_name = 't_common'").Check(testkit.Rows("COMMON CLUSTERED"))
 	tk.MustQuery("SELECT TIDB_PK_TYPE FROM information_schema.tables where table_schema = 'INFORMATION_SCHEMA' and table_name = 'TABLES'").Check(testkit.Rows("NON-CLUSTERED"))
+}
+
+func (s *testInfoschemaClusterTableSuite) TestTablesEngine(c *C) {
+	tk := testkit.NewTestKitWithInit(c, s.store)
+	tk.MustExec("create table t_row (a int primary key)")
+	tk.MustQuery("select engine from information_schema.tables where table_schema = 'test' and table_name = 't_row'").Check(testkit.Rows("InnoDB"))
+	tk.MustExec("create table t_columnar (a int primary key) engine=tiflash")
+	tk.MustQuery("select engine from information_schema.tables where table_schema = 'test' and table_name = 't_columnar'").Check(testkit.Rows("TiFlash"))
 }

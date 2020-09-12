@@ -470,6 +470,10 @@ func (e *memtableRetriever) setDataFromTables(ctx sessionctx.Context, schemas []
 				if util.IsSystemView(schema.Name.L) {
 					tableType = "SYSTEM VIEW"
 				}
+				engine := "InnoDB"
+				if table.IsColumnar {
+					engine = "TiFlash"
+				}
 				if table.PKIsHandle {
 					pkType = "INT CLUSTERED"
 				} else if table.IsCommonHandle {
@@ -481,7 +485,7 @@ func (e *memtableRetriever) setDataFromTables(ctx sessionctx.Context, schemas []
 					schema.Name.O,         // TABLE_SCHEMA
 					table.Name.O,          // TABLE_NAME
 					tableType,             // TABLE_TYPE
-					"InnoDB",              // ENGINE
+					engine,                // ENGINE
 					uint64(10),            // VERSION
 					"Compact",             // ROW_FORMAT
 					rowCount,              // TABLE_ROWS
@@ -989,6 +993,14 @@ func (e *memtableRetriever) setDataFromEngines() {
 			"YES", // Transactions
 			"YES", // XA
 			"YES", // Savepoints
+		),
+		types.MakeDatums(
+			"TiFlash",         // Engine
+			"YES",             // Support
+			"Column-oriented", // Comment
+			"NO",              // Transactions
+			"NO",              // XA
+			"NO",              // Savepoints
 		),
 	)
 	e.rows = rows

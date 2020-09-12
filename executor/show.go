@@ -913,7 +913,11 @@ func ConstructResultOfShowCreateTable(ctx sessionctx.Context, tableInfo *model.T
 
 	buf.WriteString("\n")
 
-	buf.WriteString(") ENGINE=InnoDB")
+	if tableInfo.IsColumnar {
+		buf.WriteString(") ENGINE=TiFlash")
+	} else {
+		buf.WriteString(") ENGINE=InnoDB")
+	}
 	// We need to explicitly set the default charset and collation
 	// to make it work on MySQL server which has default collate utf8_general_ci.
 	if len(tblCollate) == 0 || tblCollate == "binary" {

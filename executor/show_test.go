@@ -797,6 +797,16 @@ func (s *testSuite5) TestShowCreateTable(c *C) {
 			") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
 	))
 
+	// Test columnar table
+	tk.MustExec(`drop table if exists columnar`)
+	tk.MustExec(`create table columnar(a int primary key) engine=tiflash`)
+	tk.MustQuery(`show create table columnar`).Check(testutil.RowsWithSep("|",
+		""+
+			"columnar CREATE TABLE `columnar` (\n"+
+			"  `a` int(11) NOT NULL,\n"+
+			"  PRIMARY KEY (`a`)\n"+
+			") ENGINE=TiFlash DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+	))
 }
 
 func (s *testAutoRandomSuite) TestShowCreateTableAutoRandom(c *C) {
