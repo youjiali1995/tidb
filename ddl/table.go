@@ -14,6 +14,7 @@
 package ddl
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"sync/atomic"
@@ -25,7 +26,9 @@ import (
 	"github.com/pingcap/parser/charset"
 	"github.com/pingcap/parser/model"
 	field_types "github.com/pingcap/parser/types"
+	"github.com/pingcap/tidb/ddl/placement"
 	"github.com/pingcap/tidb/ddl/util"
+	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta"
@@ -33,12 +36,13 @@ import (
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/tablecodec"
+	"github.com/pingcap/tidb/util/codec"
 	"github.com/pingcap/tidb/util/gcutil"
 )
 
 const tiflashCheckTiDBHTTPAPIHalfInterval = 2500 * time.Millisecond
 
-func onCreateTable(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error) {
+func (w *worker) onCreateTable(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error) {
 	failpoint.Inject("mockExceedErrorLimit", func(val failpoint.Value) {
 		if val.(bool) {
 			failpoint.Return(ver, errors.New("mock do job error"))
@@ -83,6 +87,15 @@ func onCreateTable(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error)
 			}
 		})
 
+		// TODO(youjiali1995): Do we need to save it in some place like TableInfo.TiFLashReplica?
+		// Do we need to create the group at first?
+		// Add tests.
+		err = w.addPlacementRuleForColumnarTable(schemaID, tbInfo)
+		if err != nil {
+			job.State = model.JobStateCancelled
+			return ver, errors.Trace(err)
+		}
+
 		// Finish this job.
 		job.FinishTableJob(model.JobStateDone, model.StatePublic, ver, tbInfo)
 		asyncNotifyEvent(d, &util.Event{Tp: model.ActionCreateTable, TableInfo: tbInfo})
@@ -99,6 +112,75 @@ func createTableOrViewWithCheck(t *meta.Meta, job *model.Job, schemaID int64, tb
 		return errors.Trace(err)
 	}
 	return t.CreateTableOrView(schemaID, tbInfo)
+}
+
+func (w *worker) getTiFlashStoreCount() (uint64, error) {
+	ctx, err := w.sessPool.get()
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	defer w.sessPool.put(ctx)
+	return infoschema.GetTiFlashStoreCount(ctx)
+}
+
+const ruleColumnarTableGroupID = "TIDB_COLUMNAR"
+
+func (w *worker) addPlacementRuleForColumnarTable(schemaID int64, tbInfo *model.TableInfo) error {
+	if !tbInfo.IsColumnar {
+		return nil
+	}
+	// Check TiFlash stores
+	cnt, err := w.getTiFlashStoreCount()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if cnt == 0 {
+		return ErrCantCreateColumnarTable.GenWithStackByArgs(tbInfo.Name, "no TiFlash stores")
+	}
+	rule := &placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule: &placement.Rule{
+			GroupID:     ruleColumnarTableGroupID,
+			ID:          fmt.Sprintf("%d_t%d", schemaID, tbInfo.ID),
+			Index:       1024, // large enough to override rules in other groups
+			Override:    true,
+			StartKeyHex: hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(tbInfo.ID))),
+			EndKeyHex:   hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTablePrefix(tbInfo.ID+1))),
+			Role:        placement.Voter,
+			Count:       int(cnt), // TODO(youjiali1995): now the count equals TiFlash store count.
+			LabelConstraints: []placement.LabelConstraint{
+				placement.LabelConstraint{
+					Key:    "engine",
+					Op:     placement.In,
+					Values: []string{kv.TiFlash.Name()},
+				},
+			},
+		},
+	}
+	err = infosync.UpdatePlacementRules(nil, []*placement.RuleOp{rule})
+	if err != nil {
+		return errors.Wrapf(err, "failed to notify PD the placement rules for columnar table")
+	}
+	return nil
+}
+
+func deletePlacementRuleForColumnarTable(schemaID int64, tbInfo *model.TableInfo) error {
+	if !tbInfo.IsColumnar {
+		return nil
+	}
+	rule := &placement.RuleOp{
+		Action:           placement.RuleOpDel,
+		DeleteByIDPrefix: true,
+		Rule: &placement.Rule{
+			GroupID: ruleColumnarTableGroupID,
+			ID:      fmt.Sprintf("%d_t%d", schemaID, tbInfo.ID),
+		},
+	}
+	err := infosync.UpdatePlacementRules(nil, []*placement.RuleOp{rule})
+	if err != nil {
+		return errors.Wrapf(err, "failed to notify PD the placement rules for columnar table")
+	}
+	return nil
 }
 
 func repairTableOrViewWithCheck(t *meta.Meta, job *model.Job, schemaID int64, tbInfo *model.TableInfo) error {
@@ -195,6 +277,10 @@ func onDropTableOrView(t *meta.Meta, job *model.Job) (ver int64, _ error) {
 			if err = t.DropTableOrView(job.SchemaID, job.TableID, true); err != nil {
 				break
 			}
+		}
+		if err = deletePlacementRuleForColumnarTable(job.SchemaID, tblInfo); err != nil {
+			// TODO(youjiali1995): Do we need to cancel the job?
+			break
 		}
 		// Finish this job.
 		job.FinishTableJob(model.JobStateDone, model.StateNone, ver, tblInfo)

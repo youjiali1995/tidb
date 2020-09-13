@@ -614,7 +614,7 @@ func (w *worker) runDDLJob(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, 
 	case model.ActionDropSchema:
 		ver, err = onDropSchema(t, job)
 	case model.ActionCreateTable:
-		ver, err = onCreateTable(d, t, job)
+		ver, err = w.onCreateTable(d, t, job)
 	case model.ActionRepairTable:
 		ver, err = onRepairTable(d, t, job)
 	case model.ActionCreateView:

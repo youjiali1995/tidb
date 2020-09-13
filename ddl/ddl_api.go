@@ -1620,6 +1620,14 @@ func checkColumnarTable(ctx sessionctx.Context, tbInfo *model.TableInfo) error {
 	if len(tbInfo.Indices) > 1 || (len(tbInfo.Indices) == 1 && !tbInfo.IsCommonHandle) {
 		return ErrCantCreateColumnarTable.GenWithStackByArgs(tbInfo.Name, "indices are not supported")
 	}
+	// Check TiFlash stores
+	cnt, err := infoschema.GetTiFlashStoreCount(ctx)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if cnt == 0 {
+		return ErrCantCreateColumnarTable.GenWithStackByArgs(tbInfo.Name, "no TiFlash stores")
+	}
 	return nil
 }
 
@@ -1768,7 +1776,6 @@ func (d *ddl) CreateTableWithInfo(
 			err = nil
 		}
 	} else if actionType == model.ActionCreateTable {
-		// TODO(youjiali1995): set placement rules for columnar tables.
 		d.preSplitAndScatter(ctx, tbInfo, tbInfo.GetPartitionInfo())
 		if tbInfo.AutoIncID > 1 {
 			// Default tableAutoIncID base is 0.

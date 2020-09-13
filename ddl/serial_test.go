@@ -1478,7 +1478,9 @@ func (s *testSerialSuite) TestCreateTableNoBlock(c *C) {
 
 func (s *testSerialSuite) TestCreateColumnarTable(c *C) {
 	tk := testkit.NewTestKitWithInit(c, s.store)
+	c.Assert(failpoint.Enable("github.com/pingcap/tidb/infoschema/mockTiFlashStoreCount", `return(true)`), IsNil)
 	defer func() {
+		defer failpoint.Disable("github.com/pingcap/tidb/infoschema/mockTiFlashStoreCount")
 		tk.Se.GetSessionVars().EnableClusteredIndex = false
 		config.RestoreFunc()()
 	}()
@@ -1524,4 +1526,8 @@ func (s *testSerialSuite) TestCreateColumnarTable(c *C) {
 	tk.Se.GetSessionVars().EnableClusteredIndex = true
 	_, err = tk.Exec("create table t (a varchar(255) primary key, b int unique) engine = tiflash")
 	c.Assert(err.Error(), Matches, ".*Can't create columnar table 't': indices are not supported")
+
+	failpoint.Disable("github.com/pingcap/tidb/infoschema/mockTiFlashStoreCount")
+	_, err = tk.Exec("create table t (a int primary key) engine = tiflash")
+	c.Assert(err.Error(), Matches, ".*Can't create columnar table 't': no TiFlash stores")
 }
