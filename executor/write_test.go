@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/tidb/executor"
@@ -2866,4 +2867,97 @@ from t order by c_str;`).Check(testkit.Rows("10"))
 	// Test batchPointGet
 	tk.MustQuery(`select sum((select t1.c_str from t t1 where t1.c_int in (11, 10086) and t1.c_str > t.c_str order by t1.c_decimal limit 1) is null) nulls
 from t order by c_str;`).Check(testkit.Rows("10"))
+}
+
+func (s *testSuite7) TestWriteColumnarTable(c *C) {
+	c.Assert(failpoint.Enable("github.com/pingcap/tidb/infoschema/mockTiFlashStoreCount", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/pingcap/tidb/infoschema/mockTiFlashStoreCount")
+
+	tk := testkit.NewTestKitWithInit(c, s.store)
+	tk.MustExec("use test")
+	tk.MustExec(`drop table if exists t_columnar, t_row;`)
+	tk.MustExec(`create table t_columnar(pk int primary key) engine=tiflash`)
+
+	// Unsupported operation
+	_, err := tk.Exec("insert into t_columnar values(1)")
+	c.Assert(err.Error(), Matches, "insert into columnar table.*not supported.*")
+	_, err = tk.Exec("select * from t_columnar for update")
+	c.Assert(err.Error(), Matches, "columnar table t_columnar don't support select-for-update")
+	_, err = tk.Exec("update t_columnar set pk = 2 where pk = 1")
+	c.Assert(err.Error(), Matches, "update columnar table.*not supported.*")
+	_, err = tk.Exec("update t_columnar set pk = 2 where pk > 1")
+	c.Assert(err.Error(), Matches, "update columnar table.*not supported.*")
+	_, err = tk.Exec("delete from t_columnar where pk > 0")
+	c.Assert(err.Error(), Matches, "delete columnar table t_columnar should use point get plan.")
+
+	// Can't update tables using different engines in one statement.
+	tk.MustExec(`create table t_row(pk int primary key)`)
+	sql := `delete t_row, t_columnar from t_row inner join t_columnar where t_row.pk = t_columnar.pk`
+	_, err = tk.Exec(sql)
+	c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
+	_, err = tk.Exec("explain analyze " + sql)
+	c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
+
+	// Can't update tables using different engines in on transaction.
+	columnarDML := []string{
+		"replace into t_columnar value (1)",
+		"delete from t_columnar where pk = 1",
+	}
+	rowDML := []string{
+		"insert into t_row value (1)",
+		"update t_row set pk = 2 where pk = 1",
+		"delete from t_row where pk = 1",
+	}
+	for _, dml1 := range columnarDML {
+		tk.MustExec("begin")
+		txnCtx := tk.Se.GetSessionVars().TxnCtx
+		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.UnSpecified))
+		tk.MustExec(dml1)
+		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiFlash))
+		for _, dml2 := range rowDML {
+			_, err = tk.Exec(dml2)
+			c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiFlash))
+			c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
+		}
+		tk.MustExec("rollback")
+	}
+	for _, dml := range columnarDML {
+		tk.MustExec("begin")
+		txnCtx := tk.Se.GetSessionVars().TxnCtx
+		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.UnSpecified))
+		tk.MustExec(`insert into t_row value (1)`)
+		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiKV))
+		_, err = tk.Exec(dml)
+		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiKV))
+		c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
+		tk.MustExec("rollback")
+	}
+
+	tk.MustExec(`set @@tidb_enable_clustered_index=true`)
+	tk.MustExec(`create table t_columnar_clustered(pk varchar(128) primary key) engine=tiflash`)
+
+	// Replace and delete
+	for _, table := range []string{"t_columnar", "t_columnar_clustered"} {
+		tk.MustExec(fmt.Sprintf("replace into %s values (1)", table))
+		c.Assert(int64(tk.Se.AffectedRows()), Equals, int64(2))
+		tk.MustQuery(fmt.Sprintf(`select * from %s`, table)).Check(testkit.Rows("1"))
+		tk.MustExec(fmt.Sprintf("delete from %s where pk = 1", table))
+		c.Assert(int64(tk.Se.AffectedRows()), Equals, int64(1))
+		tk.MustQuery(fmt.Sprintf(`select * from %s`, table)).Check(testkit.Rows())
+	}
+
+	deleteSQL := []string{
+		// "delete from %s where pk = 1 or pk = 2", // It's not batchPointGet in clustered table.
+		"delete from %s where pk in (1, 2)",
+	}
+	for _, table := range []string{"t_columnar", "t_columnar_clustered"} {
+		for _, sql := range deleteSQL {
+			tk.MustExec(fmt.Sprintf("replace into %s values (1), (2)", table))
+			c.Assert(int64(tk.Se.AffectedRows()), Equals, int64(4))
+			tk.MustQuery(fmt.Sprintf(`select * from %s`, table)).Check(testkit.Rows("1", "2"))
+			tk.MustExec(fmt.Sprintf(sql, table))
+			c.Assert(int64(tk.Se.AffectedRows()), Equals, int64(2))
+			tk.MustQuery(fmt.Sprintf(`select * from %s`, table)).Check(testkit.Rows())
+		}
+	}
 }

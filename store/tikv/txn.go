@@ -41,10 +41,11 @@ var (
 )
 
 var (
-	tikvTxnCmdHistogramWithCommit   = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblCommit)
-	tikvTxnCmdHistogramWithRollback = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblRollback)
-	tikvTxnCmdHistogramWithBatchGet = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblBatchGet)
-	tikvTxnCmdHistogramWithGet      = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblGet)
+	tikvTxnCmdHistogramWithCommit         = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblCommit)
+	tikvTxnCmdHistogramWithCommitColumnar = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblCommitColumnar)
+	tikvTxnCmdHistogramWithRollback       = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblRollback)
+	tikvTxnCmdHistogramWithBatchGet       = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblBatchGet)
+	tikvTxnCmdHistogramWithGet            = metrics.TiKVTxnCmdHistogram.WithLabelValues(metrics.LblGet)
 )
 
 // SchemaAmender is used by pessimistic transactions to amend commit mutations for schema change during 2pc.
@@ -197,6 +198,10 @@ func (txn *tikvTxn) IsPessimistic() bool {
 	return txn.us.GetOption(kv.Pessimistic) != nil
 }
 
+func (txn *tikvTxn) IsColumnar() bool {
+	return txn.us.GetOption(kv.EngineType) == kv.TiFlash
+}
+
 func (txn *tikvTxn) Commit(ctx context.Context) error {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span1 := span.Tracer().StartSpan("tikvTxn.Commit", opentracing.ChildOf(span.Context()))
@@ -208,6 +213,7 @@ func (txn *tikvTxn) Commit(ctx context.Context) error {
 	if !txn.valid {
 		return kv.ErrInvalidTxn
 	}
+
 	defer txn.close()
 
 	failpoint.Inject("mockCommitError", func(val failpoint.Value) {
@@ -218,7 +224,13 @@ func (txn *tikvTxn) Commit(ctx context.Context) error {
 	})
 
 	start := time.Now()
-	defer func() { tikvTxnCmdHistogramWithCommit.Observe(time.Since(start).Seconds()) }()
+	defer func() {
+		if txn.IsColumnar() {
+			tikvTxnCmdHistogramWithCommitColumnar.Observe(time.Since(start).Seconds())
+		} else {
+			tikvTxnCmdHistogramWithCommit.Observe(time.Since(start).Seconds())
+		}
+	}()
 
 	// connID is used for log.
 	var connID uint64
@@ -235,10 +247,12 @@ func (txn *tikvTxn) Commit(ctx context.Context) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
+	} else if txn.IsColumnar() {
+		return errors.New("Columnar table shouldn't create TwoPhaseCommitter before committing")
 	}
 	defer func() {
 		// For async commit transactions, the ttl manager will be closed in the asynchronous commit goroutine.
-		if !committer.isAsyncCommit() {
+		if !committer.isAsyncCommit() && !txn.IsColumnar() {
 			committer.ttlManager.close()
 		}
 	}()
@@ -266,7 +280,7 @@ func (txn *tikvTxn) Commit(ctx context.Context) error {
 	}()
 	// latches disabled
 	// pessimistic transaction should also bypass latch.
-	if txn.store.txnLatches == nil || txn.IsPessimistic() {
+	if txn.store.txnLatches == nil || txn.IsPessimistic() || txn.IsColumnar() {
 		err = committer.execute(ctx)
 		logutil.Logger(ctx).Debug("[kv] txnLatches disabled, 2pc directly", zap.Error(err))
 		return errors.Trace(err)

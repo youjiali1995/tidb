@@ -389,6 +389,17 @@ func (s *session) StmtCommit() {
 	st := &s.txn
 	st.flushStmtBuf()
 
+	if !s.txn.IsReadOnly() {
+		txnCtx := s.GetSessionVars().TxnCtx
+		if txnCtx.Engine == kv.UnSpecified {
+			if s.GetSessionVars().StmtCtx.ModifyColumnar {
+				txnCtx.Engine = kv.TiFlash
+			} else {
+				txnCtx.Engine = kv.TiKV
+			}
+		}
+	}
+
 	// Need to flush binlog.
 	for tableID, delta := range st.mutations {
 		mutation := getBinlogMutation(s, tableID)

@@ -329,6 +329,9 @@ func (c *twoPhaseCommitter) initKeysAndMutations() error {
 }
 
 func (c *twoPhaseCommitter) primary() []byte {
+	if c.txn.IsColumnar() {
+		return nil
+	}
 	if len(c.primaryKey) == 0 {
 		return c.mutations.keys[0]
 	}
@@ -731,6 +734,10 @@ func (c *twoPhaseCommitter) cleanup(ctx context.Context) {
 
 // execute executes the two-phase commit protocol.
 func (c *twoPhaseCommitter) execute(ctx context.Context) (err error) {
+	if c.txn.IsColumnar() {
+		return c.executeColumnar(ctx)
+	}
+
 	var binlogSkipped bool
 	defer func() {
 		if !c.isAsyncCommit() {
@@ -940,6 +947,30 @@ func (c *twoPhaseCommitter) stripNoNeedCommitKeys() {
 		newIdx++
 	}
 	c.mutations = m.subRange(0, newIdx)
+}
+
+func (c *twoPhaseCommitter) executeColumnar(ctx context.Context) error {
+	// No need to check schema version and undetermined error because DM guarantees
+	// that no DMLs along with concurrent DDLs and when a transaction fails to commit,
+	// DM will stop working.
+	c.commitTS = c.startTS
+	bo := NewBackofferWithVars(ctx, int(atomic.LoadUint64(&CommitMaxBackoff)), c.txn.vars)
+	start := time.Now()
+	err := c.writeMutations(bo, c.mutations)
+	commitDetail := c.getDetail()
+	commitDetail.CommitTime = time.Since(start)
+	if bo.totalSleep > 0 {
+		atomic.AddInt64(&commitDetail.CommitBackoffTime, int64(bo.totalSleep)*int64(time.Millisecond))
+		commitDetail.Mu.Lock()
+		commitDetail.Mu.BackoffTypes = append(commitDetail.Mu.BackoffTypes, bo.types...)
+		commitDetail.Mu.Unlock()
+	}
+	if err != nil {
+		logutil.Logger(ctx).Error("2PC failed to commit columnar transaction",
+			zap.Error(err),
+			zap.Uint64("txnStartTS", c.startTS))
+	}
+	return errors.Trace(err)
 }
 
 // SchemaVer is the infoSchema which will return the schema version.

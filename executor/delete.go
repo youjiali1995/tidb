@@ -16,6 +16,7 @@ package executor
 import (
 	"context"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/kv"
@@ -41,11 +42,60 @@ type DeleteExec struct {
 	memTracker     *memory.Tracker
 }
 
+func (e *DeleteExec) isColumnar() bool {
+	if len(e.tblID2Table) == 1 {
+		for _, table := range e.tblID2Table {
+			return table.Meta().IsColumnar
+		}
+	}
+	return false
+}
+
+func (e *DeleteExec) deleteColumnarTable(ctx context.Context) error {
+	var tbl table.Table
+	for _, table := range e.tblID2Table {
+		tbl = table
+	}
+	switch x := e.children[0].(type) {
+	case *PointGetExecutor:
+		if x.idxInfo != nil {
+			if isCommonHandleRead(x.tblInfo, x.idxInfo) {
+				handleBytes, err := EncodeUniqueIndexValuesForKey(x.ctx, x.tblInfo, x.idxInfo, x.idxVals)
+				if err != nil {
+					return err
+				}
+				x.handle, err = kv.NewCommonHandle(handleBytes)
+				if err != nil {
+					return err
+				}
+			} else {
+				break
+			}
+		}
+		return e.removeRow(e.ctx, tbl, x.handle, nil)
+	case *BatchPointGetExec:
+		for _, handle := range x.handles {
+			if err := e.removeRow(e.ctx, tbl, handle, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return errors.Errorf("delete columnar table %s should use point get plan.", tbl.Meta().Name.O)
+}
+
 // Next implements the Executor Next interface.
 func (e *DeleteExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	req.Reset()
 	if e.IsMultiTable {
 		return e.deleteMultiTablesByChunk(ctx)
+	}
+	if e.isColumnar() {
+		err := e.deleteColumnarTable(ctx)
+		if err == nil {
+			e.ctx.GetSessionVars().StmtCtx.ModifyColumnar = true
+		}
+		return err
 	}
 	return e.deleteSingleTableByChunk(ctx)
 }

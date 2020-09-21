@@ -418,6 +418,20 @@ func (h *rpcHandler) handleTxnHeartBeat(req *kvrpcpb.TxnHeartBeatRequest) *kvrpc
 	return &resp
 }
 
+func (h *rpcHandler) handleKvWrite(req *kvrpcpb.WriteRequest) *kvrpcpb.WriteResponse {
+	for _, m := range req.Mutations {
+		if !h.checkKeyInRegion(m.Key) {
+			panic("KvPrewrite: key not in region")
+		}
+	}
+	var resp kvrpcpb.WriteResponse
+	err := h.mvccStore.Write(req)
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	return &resp
+}
+
 func (h *rpcHandler) handleKvBatchGet(req *kvrpcpb.BatchGetRequest) *kvrpcpb.BatchGetResponse {
 	for _, k := range req.Keys {
 		if !h.checkKeyInRegion(k) {
@@ -923,6 +937,13 @@ func (c *RPCClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 			return resp, nil
 		}
 		resp.Resp = handler.handleTxnHeartBeat(r)
+	case tikvrpc.CmdWrite:
+		r := req.Write()
+		if err := handler.checkRequest(reqCtx, r.Size()); err != nil {
+			resp.Resp = &kvrpcpb.WriteResponse{RegionError: err}
+			return resp, nil
+		}
+		resp.Resp = handler.handleKvWrite(r)
 	case tikvrpc.CmdBatchGet:
 		r := req.BatchGet()
 		if err := handler.checkRequest(reqCtx, r.Size()); err != nil {

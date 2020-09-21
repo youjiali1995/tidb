@@ -50,6 +50,7 @@ const (
 	CmdTxnHeartBeat
 	CmdCheckTxnStatus
 	CmdCheckSecondaryLocks
+	CmdWrite
 
 	CmdRawGet CmdType = 256 + iota
 	CmdRawBatchGet
@@ -154,6 +155,8 @@ func (t CmdType) String() string {
 		return "DebugGetRegionProperties"
 	case CmdTxnHeartBeat:
 		return "TxnHeartBeat"
+	case CmdWrite:
+		return "Write"
 	}
 	return "Unknown"
 }
@@ -370,6 +373,10 @@ func (req *Request) TxnHeartBeat() *kvrpcpb.TxnHeartBeatRequest {
 	return req.Req.(*kvrpcpb.TxnHeartBeatRequest)
 }
 
+func (req *Request) Write() *kvrpcpb.WriteRequest {
+	return req.Req.(*kvrpcpb.WriteRequest)
+}
+
 // ToBatchCommandsRequest converts the request to an entry in BatchCommands request.
 func (req *Request) ToBatchCommandsRequest() *tikvpb.BatchCommandsRequest_Request {
 	switch req.Type {
@@ -425,6 +432,8 @@ func (req *Request) ToBatchCommandsRequest() *tikvpb.BatchCommandsRequest_Reques
 		return &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_CheckSecondaryLocks{CheckSecondaryLocks: req.CheckSecondaryLocks()}}
 	case CmdTxnHeartBeat:
 		return &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_TxnHeartBeat{TxnHeartBeat: req.TxnHeartBeat()}}
+	case CmdWrite:
+		return &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_Write{Write: req.Write()}}
 	}
 	return nil
 }
@@ -501,6 +510,8 @@ func FromBatchCommandsResponse(res *tikvpb.BatchCommandsResponse_Response) (*Res
 		return &Response{Resp: res.CheckTxnStatus}, nil
 	case *tikvpb.BatchCommandsResponse_Response_CheckSecondaryLocks:
 		return &Response{Resp: res.CheckSecondaryLocks}, nil
+	case *tikvpb.BatchCommandsResponse_Response_Write:
+		return &Response{Resp: res.Write}, nil
 	}
 	panic("unreachable")
 }
@@ -605,6 +616,8 @@ func SetContext(req *Request, region *metapb.Region, peer *metapb.Peer) error {
 		req.CheckTxnStatus().Context = ctx
 	case CmdCheckSecondaryLocks:
 		req.CheckSecondaryLocks().Context = ctx
+	case CmdWrite:
+		req.Write().Context = ctx
 	default:
 		return fmt.Errorf("invalid request type %v", req.Type)
 	}
@@ -740,6 +753,10 @@ func GenRegionErrorResp(req *Request, e *errorpb.Error) (*Response, error) {
 		p = &kvrpcpb.CheckSecondaryLocksResponse{
 			RegionError: e,
 		}
+	case CmdWrite:
+		p = &kvrpcpb.WriteResponse{
+			RegionError: e,
+		}
 	default:
 		return nil, fmt.Errorf("invalid request type %v", req.Type)
 	}
@@ -853,6 +870,8 @@ func CallRPC(ctx context.Context, client tikvpb.TikvClient, req *Request) (*Resp
 		resp.Resp, err = client.KvCheckSecondaryLocks(ctx, req.CheckSecondaryLocks())
 	case CmdTxnHeartBeat:
 		resp.Resp, err = client.KvTxnHeartBeat(ctx, req.TxnHeartBeat())
+	case CmdWrite:
+		resp.Resp, err = client.KvWrite(ctx, req.Write())
 	default:
 		return nil, errors.Errorf("invalid request type: %v", req.Type)
 	}

@@ -827,6 +827,7 @@ func (b *executorBuilder) buildIndexAdvise(v *plannercore.IndexAdvise) Executor 
 }
 
 func (b *executorBuilder) buildReplace(vals *InsertValues) Executor {
+	b.ctx.GetSessionVars().StmtCtx.ModifyColumnar = vals.Table.Meta().IsColumnar
 	replaceExec := &ReplaceExec{
 		InsertValues: vals,
 	}
@@ -3481,7 +3482,7 @@ func NewRowDecoder(ctx sessionctx.Context, schema *expression.Schema, tbl *model
 }
 
 func (b *executorBuilder) buildBatchPointGet(plan *plannercore.BatchPointGetPlan) Executor {
-	if b.ctx.GetSessionVars().IsPessimisticReadConsistency() {
+	if !plan.TblInfo.IsColumnar && b.ctx.GetSessionVars().IsPessimisticReadConsistency() {
 		if err := b.refreshForUpdateTSForRC(); err != nil {
 			b.err = err
 			return nil

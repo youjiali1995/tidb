@@ -167,6 +167,10 @@ type TransactionContext struct {
 	Isolation      string
 	LockExpire     uint32
 	ForUpdate      uint32
+
+	// Don't allow a transaction modifies data on different engines.
+	// It will be set when executing the first DML in a transaction.
+	Engine kv.StoreType
 }
 
 // GetShard returns the shard prefix for the next `count` rowids.
@@ -257,6 +261,7 @@ func (tc *TransactionContext) Cleanup() {
 	tc.History = nil
 	tc.TableDeltaMap = nil
 	tc.pessimisticLockCache = nil
+	tc.Engine = kv.UnSpecified
 }
 
 // ClearDelta clears the delta map.
@@ -750,7 +755,7 @@ func NewSessionVars() *SessionVars {
 		PreparedStmts:               make(map[uint32]interface{}),
 		PreparedStmtNameToID:        make(map[string]uint32),
 		PreparedParams:              make([]types.Datum, 0, 10),
-		TxnCtx:                      &TransactionContext{},
+		TxnCtx:                      &TransactionContext{Engine: kv.UnSpecified},
 		RetryInfo:                   &RetryInfo{},
 		ActiveRoles:                 make([]*auth.RoleIdentity, 0, 10),
 		StrictSQLMode:               true,

@@ -154,6 +154,8 @@ type StatementContext struct {
 	TblInfo2UnionScan     map[*model.TableInfo]bool
 	TaskID                uint64 // unique ID for an execution of a statement
 	TaskMapBakTS          uint64 // counter for
+
+	ModifyColumnar bool // whether the stmt modifies a columnar table.
 }
 
 // StmtHints are SessionVars related sql hints.

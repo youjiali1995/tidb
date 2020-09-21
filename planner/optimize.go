@@ -77,6 +77,15 @@ func IsReadOnly(node ast.Node, vars *variable.SessionVars) bool {
 func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (plannercore.Plan, types.NameSlice, error) {
 	sessVars := sctx.GetSessionVars()
 
+	p, err := plannercore.BuildDMLPlanForColumnarTable(ctx, sctx, is, node)
+	if p != nil {
+		sctx.PrepareTSFuture(ctx)
+		return p, p.OutputNames(), nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// Because for write stmt, TiFlash has a different results when lock the data in point get plan. We ban the TiFlash
 	// engine in not read only stmt.
 	if _, isolationReadContainTiFlash := sessVars.IsolationReadEngines[kv.TiFlash]; isolationReadContainTiFlash && !IsReadOnly(node, sessVars) {
@@ -85,6 +94,9 @@ func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 			sessVars.IsolationReadEngines[kv.TiFlash] = struct{}{}
 		}()
 	}
+
+	// TODO(youjiali1995): Columnar tables don't support index, so it must use table reader to read data from it.
+	// Do we need to modify the IsolationReadEngines for it?
 
 	if _, isolationReadContainTiKV := sessVars.IsolationReadEngines[kv.TiKV]; isolationReadContainTiKV {
 		var fp plannercore.Plan

@@ -966,6 +966,12 @@ func (t *TableCommon) RemoveRecord(ctx sessionctx.Context, h kv.Handle, r []type
 	if err != nil {
 		return err
 	}
+	if len(r) == 0 {
+		if ctx.GetSessionVars().TxnCtx != nil {
+			ctx.GetSessionVars().TxnCtx.UpdateDeltaForTable(t.physicalTableID, -1, 1, nil)
+		}
+		return nil
+	}
 	// The table has non-public column and this column is doing the operation of "modify/change column".
 	if len(t.Columns) > len(r) && t.Columns[len(r)].ChangeStateInfo != nil {
 		r = append(r, r[t.Columns[len(r)].ChangeStateInfo.DependencyColumnOffset])

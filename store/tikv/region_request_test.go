@@ -340,6 +340,9 @@ func (s *mockTikvGrpcServer) KvCheckSecondaryLocks(ctx context.Context, in *kvrp
 func (s *mockTikvGrpcServer) KvTxnHeartBeat(ctx context.Context, in *kvrpcpb.TxnHeartBeatRequest) (*kvrpcpb.TxnHeartBeatResponse, error) {
 	return nil, errors.New("unreachable")
 }
+func (s *mockTikvGrpcServer) KvWrite(ctx context.Context, in *kvrpcpb.WriteRequest) (*kvrpcpb.WriteResponse, error) {
+	return nil, errors.New("unreachable")
+}
 func (s *mockTikvGrpcServer) KvGC(context.Context, *kvrpcpb.GCRequest) (*kvrpcpb.GCResponse, error) {
 	return nil, errors.New("unreachable")
 }

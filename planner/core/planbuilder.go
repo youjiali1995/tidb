@@ -551,6 +551,21 @@ func NewPlanBuilder(sctx sessionctx.Context, is infoschema.InfoSchema, processor
 	}
 }
 
+func tableTargetEngine(tableInfo *model.TableInfo) kv.StoreType {
+	if tableInfo.IsColumnar {
+		return kv.TiFlash
+	}
+	return kv.TiKV
+}
+
+func checkTableEngine(ctx sessionctx.Context, tableInfo *model.TableInfo) error {
+	engine := ctx.GetSessionVars().TxnCtx.Engine
+	if engine != kv.UnSpecified && engine != tableTargetEngine(tableInfo) {
+		return errors.Errorf("modifying tables using different engines in one transaction is not supported")
+	}
+	return nil
+}
+
 // Build builds the ast node to a Plan.
 func (b *PlanBuilder) Build(ctx context.Context, node ast.Node) (Plan, error) {
 	b.optFlag |= flagPrunColumns
@@ -2212,6 +2227,12 @@ func (b *PlanBuilder) buildInsert(ctx context.Context, insert *ast.InsertStmt) (
 			err = errors.Errorf("replace into sequence %s is not supported now.", tableInfo.Name.O)
 		}
 		return nil, err
+	}
+	if err := checkTableEngine(b.ctx, tableInfo); err != nil {
+		return nil, err
+	}
+	if tableInfo.IsColumnar && !insert.IsReplace {
+		return nil, errors.Errorf("insert into columnar table %s is not supported now, please use replace into", tableInfo.Name.O)
 	}
 	// Build Schema with DBName otherwise ColumnRef with DBName cannot match any Column in Schema.
 	schema, names, err := expression.TableInfo2SchemaAndNames(b.ctx, tn.Schema, tableInfo)

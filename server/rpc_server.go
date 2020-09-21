@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/executor"
+	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/privilege"
 	"github.com/pingcap/tidb/privilege/privileges"
 	"github.com/pingcap/tidb/session"
@@ -201,6 +202,7 @@ func (s *rpcServer) createSession() (session.Session, error) {
 	}
 	privilege.BindPrivilegeManager(se, pm)
 	se.GetSessionVars().TxnCtx.InfoSchema = is
+	se.GetSessionVars().TxnCtx.Engine = kv.UnSpecified
 	// This is for disable parallel hash agg.
 	// TODO: remove this.
 	se.GetSessionVars().SetHashAggPartialConcurrency(1)

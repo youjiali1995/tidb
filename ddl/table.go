@@ -149,7 +149,7 @@ func (w *worker) addPlacementRuleForColumnarTable(schemaID int64, tbInfo *model.
 			Role:        placement.Voter,
 			Count:       int(cnt), // TODO(youjiali1995): now the count equals TiFlash store count.
 			LabelConstraints: []placement.LabelConstraint{
-				placement.LabelConstraint{
+				{
 					Key:    "engine",
 					Op:     placement.In,
 					Values: []string{kv.TiFlash.Name()},

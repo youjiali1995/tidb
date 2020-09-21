@@ -2673,6 +2673,13 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	}
 
 	if sel.LockInfo != nil && sel.LockInfo.LockType != ast.SelectLockNone {
+		var tableList []*ast.TableName
+		tableList = extractTableList(sel.From.TableRefs, tableList, false)
+		for _, t := range tableList {
+			if t.TableInfo.IsColumnar {
+				return nil, errors.Errorf("columnar table %s don't support select-for-update", t.Name.O)
+			}
+		}
 		p = b.buildSelectLock(p, sel.LockInfo)
 	}
 	b.handleHelper.popMap()
@@ -2821,6 +2828,7 @@ func getStatsTable(ctx sessionctx.Context, tblInfo *model.TableInfo, pid int64) 
 	return statsTbl
 }
 
+// TODO(youjiali1995): columnar table
 func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, asName *model.CIStr) (LogicalPlan, error) {
 	dbName := tn.Schema
 	sessionVars := b.ctx.GetSessionVars()
@@ -3490,6 +3498,12 @@ func (b *PlanBuilder) buildUpdate(ctx context.Context, update *ast.UpdateStmt) (
 		if t.TableInfo.IsSequence() {
 			return nil, errors.Errorf("update sequence %s is not supported now.", t.Name.O)
 		}
+		if t.TableInfo.IsColumnar {
+			return nil, errors.Errorf("update columnar table %s is not supported now.", t.Name.O)
+		}
+		if checkTableEngine(b.ctx, t.TableInfo) != nil {
+			return nil, errors.Errorf("modifying tables using different engines in one transaction is not supported")
+		}
 		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.SelectPriv, dbName, t.Name.L, "", nil)
 	}
 
@@ -3840,6 +3854,7 @@ func (b *PlanBuilder) buildDelete(ctx context.Context, delete *ast.DeleteStmt) (
 	var tableList []*ast.TableName
 	tableList = extractTableList(delete.TableRefs.TableRefs, tableList, true)
 
+	var tableEngine kv.StoreType = kv.UnSpecified
 	// Collect visitInfo.
 	if delete.Tables != nil {
 		// Delete a, b from a, b, c, d... add a and b.
@@ -3880,6 +3895,12 @@ func (b *PlanBuilder) buildDelete(ctx context.Context, delete *ast.DeleteStmt) (
 			if tn.TableInfo.IsSequence() {
 				return nil, errors.Errorf("delete sequence %s is not supported now.", tn.Name.O)
 			}
+			if tableEngine == kv.UnSpecified {
+				tableEngine = tableTargetEngine(tn.TableInfo)
+			}
+			if tableEngine != tableTargetEngine(tn.TableInfo) || checkTableEngine(b.ctx, tn.TableInfo) != nil {
+				return nil, errors.Errorf("modifying tables using different engines in one transaction is not supported")
+			}
 			b.visitInfo = appendVisitInfo(b.visitInfo, mysql.DeletePriv, tn.Schema.L, tn.TableInfo.Name.L, "", nil)
 		}
 	} else {
@@ -3890,6 +3911,12 @@ func (b *PlanBuilder) buildDelete(ctx context.Context, delete *ast.DeleteStmt) (
 			}
 			if v.TableInfo.IsSequence() {
 				return nil, errors.Errorf("delete sequence %s is not supported now.", v.Name.O)
+			}
+			if tableEngine == kv.UnSpecified {
+				tableEngine = tableTargetEngine(v.TableInfo)
+			}
+			if tableEngine != tableTargetEngine(v.TableInfo) || checkTableEngine(b.ctx, v.TableInfo) != nil {
+				return nil, errors.Errorf("modifying tables using different engines in one transaction is not supported")
 			}
 			dbName := v.Schema.L
 			if dbName == "" {

@@ -139,6 +139,8 @@ func (c *RPCClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 		resp.Resp, err = c.usSvr.KvCheckSecondaryLocks(ctx, req.CheckSecondaryLocks())
 	case tikvrpc.CmdTxnHeartBeat:
 		resp.Resp, err = c.usSvr.KvTxnHeartBeat(ctx, req.TxnHeartBeat())
+	case tikvrpc.CmdWrite:
+		resp.Resp, err = c.usSvr.KvWrite(ctx, req.Write())
 	case tikvrpc.CmdBatchGet:
 		resp.Resp, err = c.usSvr.KvBatchGet(ctx, req.BatchGet())
 	case tikvrpc.CmdBatchRollback:

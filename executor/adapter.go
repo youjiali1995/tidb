@@ -346,6 +346,7 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	isPessimistic := sctx.GetSessionVars().TxnCtx.IsPessimistic
 
 	// Special handle for "select for update statement" in pessimistic transaction.
+	// Columnar tables don't support select-for-update and the error is returned during building plan.
 	if isPessimistic && a.isSelectForUpdate {
 		return a.handlePessimisticSelectForUpdate(ctx, e)
 	}
@@ -392,9 +393,10 @@ func (a *ExecStmt) handleNoDelay(ctx context.Context, e Executor, isPessimistic 
 		}
 	}
 
+	modifyColumnar := sc.ModifyColumnar
 	// If the executor doesn't return any result to the client, we execute it without delay.
 	if toCheck.Schema().Len() == 0 {
-		if isPessimistic {
+		if !modifyColumnar && isPessimistic {
 			return true, nil, a.handlePessimisticDML(ctx, e)
 		}
 		r, err := a.handleNoDelayExecutor(ctx, e)

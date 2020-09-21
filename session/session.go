@@ -433,15 +433,17 @@ func (s *session) doCommit(ctx context.Context) error {
 		}
 	}
 
+	txnCtx := s.GetSessionVars().TxnCtx
 	// Get the related table or partition IDs.
-	relatedPhysicalTables := s.GetSessionVars().TxnCtx.TableDeltaMap
+	relatedPhysicalTables := txnCtx.TableDeltaMap
 	physicalTableIDs := make([]int64, 0, len(relatedPhysicalTables))
 	for id := range relatedPhysicalTables {
 		physicalTableIDs = append(physicalTableIDs, id)
 	}
 	// Set this option for 2 phase commit to validate schema lease.
-	s.txn.SetOption(kv.SchemaChecker, domain.NewSchemaChecker(domain.GetDomain(s), s.sessionVars.TxnCtx.SchemaVersion, physicalTableIDs))
-	s.txn.SetOption(kv.InfoSchema, s.sessionVars.TxnCtx.InfoSchema)
+	s.txn.SetOption(kv.SchemaChecker, domain.NewSchemaChecker(domain.GetDomain(s), txnCtx.SchemaVersion, physicalTableIDs))
+	s.txn.SetOption(kv.InfoSchema, txnCtx.InfoSchema)
+	s.txn.SetOption(kv.EngineType, txnCtx.Engine)
 	if s.GetSessionVars().EnableAmendPessimisticTxn {
 		s.txn.SetOption(kv.SchemaAmender, NewSchemaAmenderForTikvTxn(s))
 	}
@@ -1543,6 +1545,7 @@ func (s *session) NewTxn(ctx context.Context) error {
 		CreateTime:    time.Now(),
 		StartTS:       txn.StartTS(),
 		ShardStep:     int(s.sessionVars.ShardAllocateStep),
+		Engine:        kv.UnSpecified,
 	}
 	return nil
 }
@@ -2198,6 +2201,7 @@ func (s *session) PrepareTxnCtx(ctx context.Context) {
 		SchemaVersion: is.SchemaMetaVersion(),
 		CreateTime:    time.Now(),
 		ShardStep:     int(s.sessionVars.ShardAllocateStep),
+		Engine:        kv.UnSpecified,
 	}
 	if !s.sessionVars.IsAutocommit() || s.sessionVars.RetryInfo.Retrying {
 		pessTxnConf := config.GetGlobalConfig().PessimisticTxn

@@ -182,11 +182,6 @@ func (e *ReplaceExec) exec(ctx context.Context, newRows [][]types.Datum) error {
 	 */
 
 	defer trace.StartRegion(ctx, "ReplaceExec").End()
-	// Get keys need to be checked.
-	toBeCheckedRows, err := getKeysNeedCheck(ctx, e.ctx, e.Table, newRows)
-	if err != nil {
-		return err
-	}
 
 	txn, err := e.ctx.Txn(true)
 	if err != nil {
@@ -201,19 +196,36 @@ func (e *ReplaceExec) exec(ctx context.Context, newRows [][]types.Datum) error {
 		}
 	}
 
-	// Use BatchGet to fill cache.
-	// It's an optimization and could be removed without affecting correctness.
-	if err = prefetchDataCache(ctx, txn, toBeCheckedRows); err != nil {
-		return err
-	}
-
-	e.ctx.GetSessionVars().StmtCtx.AddRecordRows(uint64(len(newRows)))
-	for _, r := range toBeCheckedRows {
-		err = e.replaceRow(ctx, r)
+	if !e.Table.Meta().IsColumnar {
+		// Get keys need to be checked.
+		toBeCheckedRows, err := getKeysNeedCheck(ctx, e.ctx, e.Table, newRows)
 		if err != nil {
 			return err
 		}
+		// Use BatchGet to fill cache.
+		// It's an optimization and could be removed without affecting correctness.
+		if err = prefetchDataCache(ctx, txn, toBeCheckedRows); err != nil {
+			return err
+		}
+		for _, r := range toBeCheckedRows {
+			err = e.replaceRow(ctx, r)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// Columnar tables needn't check duplicated rows because it must have an explicit handle.
+		e.ctx.GetSessionVars().StmtCtx.BatchCheck = true
+		for _, row := range newRows {
+			if err := e.addRecord(ctx, row); err != nil {
+				return err
+			}
+		}
+		// Assume all the new rows have old row.
+		e.ctx.GetSessionVars().StmtCtx.AddAffectedRows(uint64(len(newRows)))
 	}
+
+	e.ctx.GetSessionVars().StmtCtx.AddRecordRows(uint64(len(newRows)))
 	e.memTracker.Consume(int64(txn.Size() - txnSize))
 	return nil
 }

@@ -1292,6 +1292,37 @@ func (mvcc *MVCCLevelDB) TxnHeartBeat(key []byte, startTS uint64, adviseTTL uint
 	return 0, errors.New("lock doesn't exist")
 }
 
+func (mvcc *MVCCLevelDB) Write(req *kvrpcpb.WriteRequest) error {
+	mutations := req.Mutations
+	version := req.Version
+	batch := &leveldb.Batch{}
+	for _, m := range mutations {
+		if m.Op != kvrpcpb.Op_Del && m.Op != kvrpcpb.Op_Put {
+			return errors.New("unsupported operation")
+		}
+		valueType := typePut
+		if m.Op == kvrpcpb.Op_Del {
+			valueType = typeDelete
+		}
+		value := mvccValue{
+			valueType: valueType,
+			startTS:   version,
+			commitTS:  version,
+			value:     m.Value,
+		}
+		writeKey := mvccEncode(m.Key, version)
+		writeValue, err := value.MarshalBinary()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		batch.Put(writeKey, writeValue)
+	}
+	if err := mvcc.db.Write(batch, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ScanLock implements the MVCCStore interface.
 func (mvcc *MVCCLevelDB) ScanLock(startKey, endKey []byte, maxTS uint64) ([]*kvrpcpb.LockInfo, error) {
 	mvcc.mu.RLock()

@@ -1236,6 +1236,36 @@ func (s *testCommitterSuite) TestAsyncCommit(c *C) {
 	})
 }
 
+func (s *testCommitterSuite) TestWrite(c *C) {
+	ctx := context.Background()
+	txn := s.begin(c)
+	txn.SetOption(kv.EngineType, kv.TiFlash)
+
+	key := kv.Key("key")
+	c.Assert(txn.Set(key, key), IsNil)
+	committer, err := newTwoPhaseCommitterWithInit(txn, 0)
+	c.Assert(err, IsNil)
+	err = committer.execute(ctx)
+	c.Assert(err, IsNil)
+
+	txn = s.begin(c)
+	v, err := txn.Get(ctx, key)
+	c.Assert(err, IsNil)
+	c.Assert(v, BytesEquals, []byte(key))
+
+	txn = s.begin(c)
+	txn.SetOption(kv.EngineType, kv.TiFlash)
+	c.Assert(txn.Delete(key), IsNil)
+	committer, err = newTwoPhaseCommitterWithInit(txn, 0)
+	c.Assert(err, IsNil)
+	err = committer.execute(ctx)
+	c.Assert(err, IsNil)
+
+	txn = s.begin(c)
+	_, err = txn.Get(ctx, key)
+	c.Assert(kv.IsErrNotFound(err), IsTrue)
+}
+
 type mockClient struct {
 	inner            Client
 	seenPrimaryReq   uint32

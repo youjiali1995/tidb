@@ -15,6 +15,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	math2 "math"
 
@@ -34,7 +35,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/stmtctx"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/types/parser_driver"
+	driver "github.com/pingcap/tidb/types/parser_driver"
 	"github.com/pingcap/tidb/util/math"
 	"github.com/pingcap/tidb/util/plancodec"
 	"github.com/pingcap/tidb/util/stringutil"
@@ -428,6 +429,44 @@ func TryFastPlan(ctx sessionctx.Context, node ast.Node) (p Plan) {
 		return tryDeletePointPlan(ctx, x)
 	}
 	return nil
+}
+
+func BuildDMLPlanForColumnarTable(ctx context.Context, sctx sessionctx.Context, is infoschema.InfoSchema, node ast.Node) (Plan, error) {
+	switch x := node.(type) {
+	case *ast.InsertStmt:
+		ts, ok := x.Table.TableRefs.Left.(*ast.TableSource)
+		if !ok {
+			return nil, infoschema.ErrTableNotExists.GenWithStackByArgs()
+		}
+		tn, ok := ts.Source.(*ast.TableName)
+		if !ok {
+			return nil, infoschema.ErrTableNotExists.GenWithStackByArgs()
+		}
+		if tn.TableInfo.IsColumnar {
+			if err := checkTableEngine(sctx, tn.TableInfo); err != nil {
+				return nil, err
+			}
+			builder := NewPlanBuilder(sctx, is, nil)
+			return builder.buildInsert(ctx, x)
+		}
+	case *ast.DeleteStmt:
+		ts, ok := x.TableRefs.TableRefs.Left.(*ast.TableSource)
+		if !ok {
+			return nil, nil
+		}
+		tn, ok := ts.Source.(*ast.TableName)
+		if !ok {
+			return nil, nil
+		}
+		if tn.TableInfo.IsColumnar {
+			if err := checkTableEngine(sctx, tn.TableInfo); err != nil {
+				return nil, err
+			}
+			p := tryDeletePointPlan(sctx, x)
+			return p, nil
+		}
+	}
+	return nil, nil
 }
 
 // IsSelectForUpdateLockType checks if the select lock type is for update type.
@@ -1070,6 +1109,9 @@ func tryUpdatePointPlan(ctx sessionctx.Context, updateStmt *ast.UpdateStmt) Plan
 	}
 	pointGet := tryPointGetPlan(ctx, selStmt)
 	if pointGet != nil {
+		if pointGet.TblInfo.IsColumnar || checkTableEngine(ctx, pointGet.TblInfo) != nil {
+			return nil
+		}
 		if pointGet.IsTableDual {
 			return PhysicalTableDual{
 				names: pointGet.outputNames,
@@ -1082,6 +1124,9 @@ func tryUpdatePointPlan(ctx sessionctx.Context, updateStmt *ast.UpdateStmt) Plan
 	}
 	batchPointGet := tryWhereIn2BatchPointGet(ctx, selStmt)
 	if batchPointGet != nil {
+		if batchPointGet.TblInfo.IsColumnar || checkTableEngine(ctx, batchPointGet.TblInfo) != nil {
+			return nil
+		}
 		if ctx.GetSessionVars().TxnCtx.IsPessimistic {
 			batchPointGet.Lock, batchPointGet.LockWaitTime = getLockWaitTime(ctx, &ast.SelectLockInfo{LockType: ast.SelectLockForUpdate})
 		}
@@ -1162,6 +1207,9 @@ func tryDeletePointPlan(ctx sessionctx.Context, delStmt *ast.DeleteStmt) Plan {
 		Limit:   delStmt.Limit,
 	}
 	if pointGet := tryPointGetPlan(ctx, selStmt); pointGet != nil {
+		if checkTableEngine(ctx, pointGet.TblInfo) != nil {
+			return nil
+		}
 		if pointGet.IsTableDual {
 			return PhysicalTableDual{
 				names: pointGet.outputNames,
@@ -1173,6 +1221,9 @@ func tryDeletePointPlan(ctx sessionctx.Context, delStmt *ast.DeleteStmt) Plan {
 		return buildPointDeletePlan(ctx, pointGet, pointGet.dbName, pointGet.TblInfo)
 	}
 	if batchPointGet := tryWhereIn2BatchPointGet(ctx, selStmt); batchPointGet != nil {
+		if checkTableEngine(ctx, batchPointGet.TblInfo) != nil {
+			return nil
+		}
 		if ctx.GetSessionVars().TxnCtx.IsPessimistic {
 			batchPointGet.Lock, batchPointGet.LockWaitTime = getLockWaitTime(ctx, &ast.SelectLockInfo{LockType: ast.SelectLockForUpdate})
 		}

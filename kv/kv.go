@@ -56,6 +56,8 @@ const (
 	SchemaAmender
 	// SampleStep skips 'SampleStep - 1' number of keys after each returned key.
 	SampleStep
+	// EngineType decides the transaction model of the transaction.
+	EngineType
 )
 
 // Priority value for transaction priority.
