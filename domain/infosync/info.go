@@ -367,6 +367,36 @@ func UpdatePlacementRules(ctx context.Context, rules []*placement.RuleOp) error 
 	return err
 }
 
+// UpdatePlacementRuleGroup is used to notify PD changes of a placement rules group.
+func UpdatePlacementRuleGroup(ctx context.Context, group *placement.RuleGroup) error {
+	if group == nil {
+		return nil
+	}
+
+	is, err := getGlobalInfoSyncer()
+	if err != nil {
+		return err
+	}
+
+	if is.etcdCli == nil {
+		return nil
+	}
+
+	addrs := is.etcdCli.Endpoints()
+
+	if len(addrs) == 0 {
+		return errors.Errorf("pd unavailable")
+	}
+
+	b, err := json.Marshal(group)
+	if err != nil {
+		return err
+	}
+
+	_, err = doRequest(ctx, addrs, path.Join(pdapi.Config, "rule_group"), http.MethodPost, bytes.NewReader(b))
+	return err
+}
+
 func (is *InfoSyncer) getAllServerInfo(ctx context.Context) (map[string]*ServerInfo, error) {
 	allInfo := make(map[string]*ServerInfo)
 	if is.etcdCli == nil {

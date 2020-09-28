@@ -14,6 +14,7 @@
 package ddl
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -87,9 +88,7 @@ func (w *worker) onCreateTable(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int
 			}
 		})
 
-		// TODO(youjiali1995): Do we need to save it in some place like TableInfo.TiFLashReplica?
-		// Do we need to create the group at first?
-		// Add tests.
+		// TODO(youjiali1995): Add tests.
 		err = w.addPlacementRuleForColumnarTable(schemaID, tbInfo)
 		if err != nil {
 			job.State = model.JobStateCancelled
@@ -137,12 +136,23 @@ func (w *worker) addPlacementRuleForColumnarTable(schemaID int64, tbInfo *model.
 	if cnt == 0 {
 		return ErrCantCreateColumnarTable.GenWithStackByArgs(tbInfo.Name, "no TiFlash stores")
 	}
+	// Create the group at first
+	group := &placement.RuleGroup{
+		ID:       ruleColumnarTableGroupID,
+		Index:    1024, // large enough to override rules in other groups
+		Override: true,
+	}
+	err = infosync.UpdatePlacementRuleGroup(context.TODO(), group)
+	if err != nil {
+		return errors.Wrapf(err, "failed to notify PD the placement rules for columnar table")
+	}
+	// Create the rule
 	rule := &placement.RuleOp{
 		Action: placement.RuleOpAdd,
 		Rule: &placement.Rule{
 			GroupID:     ruleColumnarTableGroupID,
 			ID:          fmt.Sprintf("%d_t%d", schemaID, tbInfo.ID),
-			Index:       1024, // large enough to override rules in other groups
+			Index:       1024, // large enough to override rules in the group
 			Override:    true,
 			StartKeyHex: hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(tbInfo.ID))),
 			EndKeyHex:   hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTablePrefix(tbInfo.ID+1))),
@@ -157,7 +167,7 @@ func (w *worker) addPlacementRuleForColumnarTable(schemaID int64, tbInfo *model.
 			},
 		},
 	}
-	err = infosync.UpdatePlacementRules(nil, []*placement.RuleOp{rule})
+	err = infosync.UpdatePlacementRules(context.TODO(), []*placement.RuleOp{rule})
 	if err != nil {
 		return errors.Wrapf(err, "failed to notify PD the placement rules for columnar table")
 	}
@@ -176,7 +186,7 @@ func deletePlacementRuleForColumnarTable(schemaID int64, tbInfo *model.TableInfo
 			ID:      fmt.Sprintf("%d_t%d", schemaID, tbInfo.ID),
 		},
 	}
-	err := infosync.UpdatePlacementRules(nil, []*placement.RuleOp{rule})
+	err := infosync.UpdatePlacementRules(context.TODO(), []*placement.RuleOp{rule})
 	if err != nil {
 		return errors.Wrapf(err, "failed to notify PD the placement rules for columnar table")
 	}

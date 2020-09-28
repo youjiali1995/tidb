@@ -109,3 +109,15 @@ func (op *RuleOp) String() string {
 	}
 	return string(b)
 }
+
+// RuleGroup defines properties of a rule group.
+type RuleGroup struct {
+	ID       string `json:"id,omitempty"`
+	Index    int    `json:"index,omitempty"`
+	Override bool   `json:"override,omitempty"`
+}
+
+func (g *RuleGroup) String() string {
+	b, _ := json.Marshal(g)
+	return string(b)
+}

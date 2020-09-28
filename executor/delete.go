@@ -264,6 +264,15 @@ func (e *DeleteExec) Open(ctx context.Context) error {
 	e.memTracker = memory.NewTracker(e.id, -1)
 	e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
 
+	if e.isColumnar() {
+		switch e.children[0].(type) {
+		case *PointGetExecutor:
+		case *BatchPointGetExec:
+		default:
+			return errors.Errorf("delete columnar table should use point get plan.")
+		}
+	}
+
 	return e.children[0].Open(ctx)
 }
 
