@@ -1317,10 +1317,7 @@ func (mvcc *MVCCLevelDB) Write(req *kvrpcpb.WriteRequest) error {
 		}
 		batch.Put(writeKey, writeValue)
 	}
-	if err := mvcc.db.Write(batch, nil); err != nil {
-		return err
-	}
-	return nil
+	return mvcc.db.Write(batch, nil)
 }
 
 // ScanLock implements the MVCCStore interface.

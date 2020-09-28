@@ -79,6 +79,7 @@ type tikvSnapshot struct {
 		stats  *SnapshotRuntimeStats
 	}
 	sampleStep uint32
+	storeType  kv.StoreType
 }
 
 // newTiKVSnapshot creates a snapshot of an TiKV store.
@@ -92,6 +93,7 @@ func newTiKVSnapshot(store *tikvStore, ver kv.Version, replicaReadSeed uint32) *
 		minCommitTSPushed: minCommitTSPushed{
 			data: make(map[uint64]struct{}, 5),
 		},
+		storeType: kv.TiKV,
 	}
 }
 
@@ -258,8 +260,11 @@ func (s *tikvSnapshot) batchGetSingleRegion(bo *Backoffer, batch batchKeys, coll
 			NotFillCache: s.notFillCache,
 			TaskId:       s.taskID,
 		})
+		if s.storeType == kv.TiFlash {
+			req.StoreTp = kv.TiFlash
+		}
 
-		resp, _, _, err := cli.SendReqCtx(bo, req, batch.region, ReadTimeoutMedium, kv.TiKV, "")
+		resp, _, _, err := cli.SendReqCtx(bo, req, batch.region, ReadTimeoutMedium, s.storeType, "")
 
 		if err != nil {
 			return errors.Trace(err)
@@ -386,12 +391,15 @@ func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
 			NotFillCache: s.notFillCache,
 			TaskId:       s.taskID,
 		})
+	if s.storeType == kv.TiFlash {
+		req.StoreTp = kv.TiFlash
+	}
 	for {
 		loc, err := s.store.regionCache.LocateKey(bo, k)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		resp, _, _, err := cli.SendReqCtx(bo, req, loc.Region, readTimeoutShort, kv.TiKV, "")
+		resp, _, _, err := cli.SendReqCtx(bo, req, loc.Region, readTimeoutShort, s.storeType, "")
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -470,6 +478,8 @@ func (s *tikvSnapshot) SetOption(opt kv.Option, val interface{}) {
 		s.mu.Unlock()
 	case kv.SampleStep:
 		s.sampleStep = val.(uint32)
+	case kv.EngineType:
+		s.storeType = val.(kv.StoreType)
 	}
 }
 

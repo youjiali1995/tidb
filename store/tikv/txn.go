@@ -199,7 +199,7 @@ func (txn *tikvTxn) IsPessimistic() bool {
 }
 
 func (txn *tikvTxn) IsColumnar() bool {
-	return txn.us.GetOption(kv.EngineType) == kv.TiFlash
+	return txn != nil && txn.us.GetOption(kv.EngineType) == kv.TiFlash
 }
 
 func (txn *tikvTxn) Commit(ctx context.Context) error {

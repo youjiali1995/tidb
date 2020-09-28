@@ -269,7 +269,11 @@ func (s *RegionRequestSender) SendReqCtx(
 			}
 			rpcCtx, err = s.regionCache.GetTiKVRPCContext(bo, regionID, replicaRead, seed)
 		case kv.TiFlash:
-			rpcCtx, err = s.regionCache.GetTiFlashRPCContext(bo, regionID)
+			var seed uint32
+			if req.ReplicaReadSeed != nil {
+				seed = *req.ReplicaReadSeed
+			}
+			rpcCtx, err = s.regionCache.GetTiFlashRPCContext(bo, regionID, replicaRead, seed)
 		case kv.TiDB:
 			rpcCtx = &RPCContext{
 				Addr: s.storeAddr,
@@ -539,7 +543,7 @@ func (s *RegionRequestSender) onRegionError(bo *Backoffer, ctx *RPCContext, seed
 			}
 		} else {
 			// don't backoff if a new leader is returned.
-			s.regionCache.UpdateLeader(ctx.Region, notLeader.GetLeader().GetStoreId(), ctx.AccessIdx)
+			s.regionCache.UpdateLeader(ctx.Region, notLeader.GetLeader().GetStoreId(), ctx.AccessIdx, ctx.AccessMode)
 		}
 
 		return true, nil

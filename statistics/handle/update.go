@@ -729,7 +729,7 @@ func (h *Handle) HandleAutoAnalyze(is infoschema.InfoSchema) {
 }
 
 func (h *Handle) autoAnalyzeTable(tblInfo *model.TableInfo, statsTbl *statistics.Table, start, end time.Time, ratio float64, sql string) bool {
-	if statsTbl.Pseudo || statsTbl.Count < AutoAnalyzeMinCnt {
+	if statsTbl.Pseudo || statsTbl.Count < AutoAnalyzeMinCnt || tblInfo.IsColumnar {
 		return false
 	}
 	if needAnalyze, reason := NeedAnalyzeTable(statsTbl, 20*h.Lease(), ratio, start, end, time.Now()); needAnalyze {

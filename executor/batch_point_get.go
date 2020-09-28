@@ -113,6 +113,9 @@ func (e *BatchPointGetExec) Open(context.Context) error {
 	if e.ctx.GetSessionVars().GetReplicaRead().IsFollowerRead() {
 		snapshot.SetOption(kv.ReplicaRead, kv.ReplicaReadFollower)
 	}
+	if e.tblInfo.IsColumnar {
+		snapshot.SetOption(kv.EngineType, kv.TiFlash)
+	}
 	snapshot.SetOption(kv.TaskID, e.ctx.GetSessionVars().StmtCtx.TaskID)
 	var batchGetter kv.BatchGetter = snapshot
 	if txn.Valid() {
@@ -282,7 +285,7 @@ func (e *BatchPointGetExec) initialize(ctx context.Context) error {
 	var values map[string][]byte
 	rc := e.ctx.GetSessionVars().IsPessimisticReadConsistency()
 	// Lock keys (include exists and non-exists keys) before fetch all values for Repeatable Read Isolation.
-	if e.lock && !rc {
+	if !e.tblInfo.IsColumnar && e.lock && !rc {
 		lockKeys := make([]kv.Key, len(keys), len(keys)+len(indexKeys))
 		copy(lockKeys, keys)
 		for _, idxKey := range indexKeys {
@@ -323,7 +326,7 @@ func (e *BatchPointGetExec) initialize(ctx context.Context) error {
 		}
 	}
 	// Lock exists keys only for Read Committed Isolation.
-	if e.lock && rc {
+	if !e.tblInfo.IsColumnar && e.lock && rc {
 		err = LockKeys(ctx, e.ctx, e.waitTime, existKeys...)
 		if err != nil {
 			return err

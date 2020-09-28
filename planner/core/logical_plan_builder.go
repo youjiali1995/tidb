@@ -531,7 +531,7 @@ func (p *LogicalJoin) setPreferredJoinType(hintInfo *tableHintInfo) {
 }
 
 func (ds *DataSource) setPreferredStoreType(hintInfo *tableHintInfo) {
-	if hintInfo == nil {
+	if hintInfo == nil || ds.tableInfo.IsColumnar {
 		return
 	}
 
@@ -2677,7 +2677,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 		tableList = extractTableList(sel.From.TableRefs, tableList, false)
 		for _, t := range tableList {
 			if t.TableInfo.IsColumnar {
-				return nil, errors.Errorf("columnar table %s don't support select-for-update", t.Name.O)
+				return nil, errors.Errorf("columnar table %s doesn't support select-for-update", t.Name.O)
 			}
 		}
 		p = b.buildSelectLock(p, sel.LockInfo)
@@ -2891,9 +2891,11 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 	if err != nil {
 		return nil, err
 	}
-	possiblePaths, err = filterPathByIsolationRead(b.ctx, possiblePaths, dbName)
-	if err != nil {
-		return nil, err
+	if !tableInfo.IsColumnar {
+		possiblePaths, err = filterPathByIsolationRead(b.ctx, possiblePaths, dbName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Try to substitute generate column only if there is an index on generate column.

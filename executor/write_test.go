@@ -2913,10 +2913,10 @@ func (s *testSuite7) TestWriteColumnarTable(c *C) {
 		txnCtx := tk.Se.GetSessionVars().TxnCtx
 		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.UnSpecified))
 		tk.MustExec(dml1)
-		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiFlash))
+		c.Assert(txnCtx.Engine, Equals, kv.TiFlash)
 		for _, dml2 := range rowDML {
 			_, err = tk.Exec(dml2)
-			c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiFlash))
+			c.Assert(txnCtx.Engine, Equals, kv.TiFlash)
 			c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
 		}
 		tk.MustExec("rollback")
@@ -2926,9 +2926,9 @@ func (s *testSuite7) TestWriteColumnarTable(c *C) {
 		txnCtx := tk.Se.GetSessionVars().TxnCtx
 		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.UnSpecified))
 		tk.MustExec(`insert into t_row value (1)`)
-		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiKV))
+		c.Assert(txnCtx.Engine, Equals, kv.TiKV)
 		_, err = tk.Exec(dml)
-		c.Assert(txnCtx.Engine, Equals, kv.StoreType(kv.TiKV))
+		c.Assert(txnCtx.Engine, Equals, kv.TiKV)
 		c.Assert(err.Error(), Matches, "modifying tables using different engines in one transaction is not supported")
 		tk.MustExec("rollback")
 	}

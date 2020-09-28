@@ -148,6 +148,9 @@ func (e *PointGetExecutor) Open(context.Context) error {
 	if e.ctx.GetSessionVars().GetReplicaRead().IsFollowerRead() {
 		e.snapshot.SetOption(kv.ReplicaRead, kv.ReplicaReadFollower)
 	}
+	if e.tblInfo.IsColumnar {
+		e.snapshot.SetOption(kv.EngineType, kv.TiFlash)
+	}
 	e.snapshot.SetOption(kv.TaskID, e.ctx.GetSessionVars().StmtCtx.TaskID)
 	return nil
 }
@@ -285,7 +288,7 @@ func (e *PointGetExecutor) getAndLock(ctx context.Context, key kv.Key) (val []by
 }
 
 func (e *PointGetExecutor) lockKeyIfNeeded(ctx context.Context, key []byte) error {
-	if e.lock {
+	if !e.tblInfo.IsColumnar && e.lock {
 		seVars := e.ctx.GetSessionVars()
 		lockCtx := newLockCtx(seVars, e.lockWaitTime)
 		lockCtx.ReturnValues = true

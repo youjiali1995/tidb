@@ -435,8 +435,6 @@ github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200807020752-01f0abe88e93/g
 github.com/pingcap/badger v1.5.1-0.20200604041313-19c397305fcc/go.mod h1:LyrqUOHZrUDf9oGi1yoz1+qw9ckSIhQb5eMa1acOLNQ=
 github.com/pingcap/badger v1.5.1-0.20200714132513-80ba2000f159 h1:cmZSuRbdfOJd3kJjRIClrLbt3nD0xi4oqYR1c/ZrPKg=
 github.com/pingcap/badger v1.5.1-0.20200714132513-80ba2000f159/go.mod h1:LyrqUOHZrUDf9oGi1yoz1+qw9ckSIhQb5eMa1acOLNQ=
-github.com/pingcap/badger v1.5.1-0.20200810065601-8c92a97807f9 h1:tjVCYovZalb5nxH6Imn70Ifcu/FlBxMf0xFqUNW9q7Y=
-github.com/pingcap/badger v1.5.1-0.20200810065601-8c92a97807f9/go.mod h1:LyrqUOHZrUDf9oGi1yoz1+qw9ckSIhQb5eMa1acOLNQ=
 github.com/pingcap/badger v1.5.1-0.20200908111422-2e78ee155d19 h1:IXpGy7y9HyoShAFmzW2OPF0xCA5EOoSTyZHwsgYk9Ro=
 github.com/pingcap/badger v1.5.1-0.20200908111422-2e78ee155d19/go.mod h1:LyrqUOHZrUDf9oGi1yoz1+qw9ckSIhQb5eMa1acOLNQ=
 github.com/pingcap/br v0.0.0-20200426093517-dd11ae28b885/go.mod h1:4w3meMnk7HDNpNgjuRAxavruTeKJvUiXxoEWTjzXPnA=
@@ -648,14 +646,8 @@ github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 h1:eY9dn8+vbi4tKz5
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
 github.com/yookoala/realpath v1.0.0/go.mod h1:gJJMA9wuX7AcqLy1+ffPatSCySA1FQ2S8Ya9AIoYBpE=
-github.com/youjiali1995/kvproto v0.0.0-20200917154129-c0be9e2d27ba h1:bYbO6m3S61rZkzj+1WPjxjDLBMvDjn9N1Oa4LzcSVuw=
-github.com/youjiali1995/kvproto v0.0.0-20200917154129-c0be9e2d27ba/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
 github.com/youjiali1995/kvproto v0.0.0-20200921074858-a4f00ee442bd h1:fSW/LGfC8KKXXEfBL+Ev7IcJi517mMO5VcwK64Z+Tcw=
 github.com/youjiali1995/kvproto v0.0.0-20200921074858-a4f00ee442bd/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
-github.com/youjiali1995/unistore v0.0.0-20200918102246-37fb24688269 h1:GXWGA2NIB7O2c9gMv9mB2aGxFKl0fWg3Fi5r3ofaw8Q=
-github.com/youjiali1995/unistore v0.0.0-20200918102246-37fb24688269/go.mod h1:HRvJJ974cfVVhO+rN4yKszzd/JMJ/xg9CM3D6ON314c=
-github.com/youjiali1995/unistore v0.0.0-20200918103156-5f69b4f7a981 h1:02y5JhavL7XsXkeEcBoYa4E7hplAH6iH9bffZ1Jvb68=
-github.com/youjiali1995/unistore v0.0.0-20200918103156-5f69b4f7a981/go.mod h1:HRvJJ974cfVVhO+rN4yKszzd/JMJ/xg9CM3D6ON314c=
 github.com/youjiali1995/unistore v0.0.0-20200919085607-b1c05cf9ab3f h1:olL1F1xQywc/gk21h9YVAhF7eNiO+QbgWDXMsmKC614=
 github.com/youjiali1995/unistore v0.0.0-20200919085607-b1c05cf9ab3f/go.mod h1:HRvJJ974cfVVhO+rN4yKszzd/JMJ/xg9CM3D6ON314c=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

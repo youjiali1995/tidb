@@ -17,6 +17,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	pb "github.com/pingcap/kvproto/pkg/kvrpcpb"
+	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/store/tikv/tikvrpc"
 	"github.com/pingcap/tidb/util/logutil"
@@ -48,16 +49,19 @@ func (c *twoPhaseCommitter) buildWriteRequest(batch batchMutations) *tikvrpc.Req
 			Value: m.values[i],
 		}
 	}
-	return tikvrpc.NewRequest(tikvrpc.CmdWrite, &pb.WriteRequest{
+	req := tikvrpc.NewRequest(tikvrpc.CmdWrite, &pb.WriteRequest{
 		Mutations: mutations,
 		Version:   c.startTS,
 	}, pb.Context{Priority: c.priority, SyncLog: c.syncLog})
+	req.StoreTp = kv.TiFlash
+	return req
 }
 
 func (actionWrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch batchMutations) error {
 	req := c.buildWriteRequest(batch)
 	for {
-		resp, err := c.store.SendReq(bo, req, batch.region, readTimeoutShort)
+		sender := NewRegionRequestSender(c.store.regionCache, c.store.client)
+		resp, _, err := sender.SendReqCtx(bo, req, batch.region, readTimeoutShort, kv.TiFlash)
 		if err != nil {
 			return errors.Trace(err)
 		}

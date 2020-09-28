@@ -431,6 +431,7 @@ func TryFastPlan(ctx sessionctx.Context, node ast.Node) (p Plan) {
 	return nil
 }
 
+// BuildDMLPlanForColumnarTable builds the plan for columnar tables which must be replace or delete with point-get plan.
 func BuildDMLPlanForColumnarTable(ctx context.Context, sctx sessionctx.Context, is infoschema.InfoSchema, node ast.Node) (Plan, error) {
 	switch x := node.(type) {
 	case *ast.InsertStmt:

@@ -844,14 +844,17 @@ func fillContentForTablePath(tablePath *util.AccessPath, tblInfo *model.TableInf
 func getPossibleAccessPaths(ctx sessionctx.Context, tableHints *tableHintInfo, indexHints []*ast.IndexHint, tbl table.Table, dbName, tblName model.CIStr) ([]*util.AccessPath, error) {
 	tblInfo := tbl.Meta()
 	publicPaths := make([]*util.AccessPath, 0, len(tblInfo.Indices)+2)
-	tp := kv.TiKV
-	if tbl.Type().IsClusterTable() {
-		tp = kv.TiDB
+	var tablePath *util.AccessPath
+	if !tbl.Meta().IsColumnar {
+		tp := kv.TiKV
+		if tbl.Type().IsClusterTable() {
+			tp = kv.TiDB
+		}
+		tablePath = &util.AccessPath{StoreType: tp}
+		fillContentForTablePath(tablePath, tblInfo)
+		publicPaths = append(publicPaths, tablePath)
 	}
-	tablePath := &util.AccessPath{StoreType: tp}
-	fillContentForTablePath(tablePath, tblInfo)
-	publicPaths = append(publicPaths, tablePath)
-	if tblInfo.TiFlashReplica != nil && tblInfo.TiFlashReplica.Available {
+	if tbl.Meta().IsColumnar || (tblInfo.TiFlashReplica != nil && tblInfo.TiFlashReplica.Available) {
 		publicPaths = append(publicPaths, genTiFlashPath(tblInfo, false))
 		publicPaths = append(publicPaths, genTiFlashPath(tblInfo, true))
 	}
@@ -946,6 +949,9 @@ func getPossibleAccessPaths(ctx sessionctx.Context, tableHints *tableHintInfo, i
 	// If we have got "FORCE" or "USE" index hint but got no available index,
 	// we have to use table scan.
 	if len(available) == 0 {
+		if tbl.Meta().IsColumnar {
+			return nil, ErrInternal.GenWithStackByArgs(fmt.Sprintf("Can not find access path for columnar table '%s'", tbl.Meta().Name))
+		}
 		available = append(available, tablePath)
 	}
 	return available, nil
@@ -1547,6 +1553,9 @@ func (b *PlanBuilder) buildAnalyzeTable(as *ast.AnalyzeTableStmt, opts map[ast.A
 		}
 		if tbl.TableInfo.IsSequence() {
 			return nil, errors.Errorf("analyze sequence %s is not supported now.", tbl.Name.O)
+		}
+		if tbl.TableInfo.IsColumnar {
+			return nil, errors.Errorf("analyze columnar table %s is not supported now.", tbl.Name.O)
 		}
 		idxInfo, colInfo := getColsInfo(tbl)
 		physicalIDs, names, err := getPhysicalIDsAndPartitionNames(tbl.TableInfo, as.PartitionNames)
