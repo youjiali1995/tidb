@@ -273,7 +273,7 @@ func (s *RegionRequestSender) SendReqCtx(
 			if req.ReplicaReadSeed != nil {
 				seed = *req.ReplicaReadSeed
 			}
-			rpcCtx, err = s.regionCache.GetTiFlashRPCContext(bo, regionID, replicaRead, seed)
+			rpcCtx, err = s.regionCache.GetTiFlashRPCContext(bo, regionID, replicaRead, seed, req.IsCop())
 		case kv.TiDB:
 			rpcCtx = &RPCContext{
 				Addr: s.storeAddr,

@@ -161,6 +161,17 @@ func (t CmdType) String() string {
 	return "Unknown"
 }
 
+func (t CmdType) IsCop() bool {
+	switch t {
+	case CmdCop:
+	case CmdCopStream:
+	case CmdBatchCop:
+	default:
+		return false
+	}
+	return true
+}
+
 // Request wraps all kv/coprocessor requests.
 type Request struct {
 	Type CmdType
@@ -168,6 +179,10 @@ type Request struct {
 	kvrpcpb.Context
 	ReplicaReadSeed *uint32 // pointer to follower read seed in snapshot/coprocessor
 	StoreTp         kv.StoreType
+}
+
+func (req *Request) IsCop() bool {
+	return req.Type.IsCop()
 }
 
 // NewRequest returns new kv rpc request.

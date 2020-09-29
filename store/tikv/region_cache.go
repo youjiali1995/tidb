@@ -445,7 +445,7 @@ func (c *RegionCache) GetTiKVRPCContext(bo *Backoffer, id RegionVerID, replicaRe
 
 // GetTiFlashRPCContext returns RPCContext for a region must access flash store. If it returns nil, the region
 // must be out of date and already dropped from cache or not flash store found.
-func (c *RegionCache) GetTiFlashRPCContext(bo *Backoffer, id RegionVerID, replicaRead kv.ReplicaReadType, followerStoreSeed uint32) (*RPCContext, error) {
+func (c *RegionCache) GetTiFlashRPCContext(bo *Backoffer, id RegionVerID, replicaRead kv.ReplicaReadType, followerStoreSeed uint32, isCop bool) (*RPCContext, error) {
 	ts := time.Now().Unix()
 
 	cachedRegion := c.getCachedRegionWithRLock(id)
@@ -480,8 +480,15 @@ func (c *RegionCache) GetTiFlashRPCContext(bo *Backoffer, id RegionVerID, replic
 	if err != nil {
 		return nil, err
 	}
-	if store == nil || len(addr) == 0 {
+	if store == nil {
 		// Store not found, region must be out of date.
+		cachedRegion.invalidate()
+		return nil, nil
+	}
+	if !isCop {
+		addr = store.paddr
+	}
+	if len(addr) == 0 {
 		cachedRegion.invalidate()
 		return nil, nil
 	}
@@ -1413,6 +1420,7 @@ func (r *Region) ContainsByEnd(key []byte) bool {
 type Store struct {
 	addr         string        // loaded store address
 	saddr        string        // loaded store status address
+	paddr        string        // loaded store peer address. TiFlash receives write requests by this addr.
 	storeID      uint64        // store's id
 	state        uint64        // unsafe store storeState
 	resolveMutex sync.Mutex    // protect pd from concurrent init requests
@@ -1464,6 +1472,7 @@ func (s *Store) initResolve(bo *Backoffer, c *RegionCache) (addr string, err err
 		addr = store.GetAddress()
 		s.addr = addr
 		s.saddr = store.GetStatusAddress()
+		s.paddr = store.GetPeerAddress()
 		s.storeType = GetStoreTypeByMeta(store)
 	retry:
 		state = s.getResolveState()
@@ -1519,7 +1528,7 @@ func (s *Store) reResolve(c *RegionCache) {
 	addr = store.GetAddress()
 	if s.addr != addr {
 		state := resolved
-		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), storeType: storeType}
+		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), paddr: store.GetPeerAddress(), storeType: storeType}
 		newStore.state = *(*uint64)(&state)
 		c.storeMu.Lock()
 		c.storeMu.stores[newStore.storeID] = newStore
